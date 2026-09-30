@@ -1,0 +1,69 @@
+# Periscope / ePro public site map.
+# Add a new state by copying a block and filling in base_url + ext (.sdo vs .sda).
+# contact_mode:
+#   po_page         — labelled fields on the public PO summary page
+#   vendor_profile  — follow the Vendor: hyperlink (viewExternalVendorProfile)
+
+Oregon:
+  base_url: https://oregonbuys.gov
+  ext: sdo
+  contact_mode: vendor_profile
+  labels:
+    vendor:
+      - Vendor
+      - Vendor Name
+      - Supplier
+      - Supplier Name
+      - Contractor
+      - Contractor Name
+    name:
+      - Contact Name
+      - Primary Contact Name
+      - Primary Contact
+      - Vendor Contact
+      - Vendor Representative
+      - Emergency Contact Name
+    phone:
+      - Phone
+      - Contact Phone
+      - Telephone
+      - Phone Number
+      - Vendor Phone
+      - Emergency Phone
+      - Fax
+    email:
+      - Email
+      - Vendor Email
+      - Contact Email
+      - E-mail
+      - Email Address
+      - Emergency Email
+
+NJ:
+  base_url: https://www.njstart.gov
+  ext: sda
+  contact_mode: vendor_profile
+  labels:
+    vendor:
+      - Vendor
+      - Vendor Name
+      - Organization Name
+      - Legal Name
+      - Supplier
+    name:
+      - Contact Name
+      - Primary Contact Name
+      - Primary Contact
+      - Emergency Contact Name
+    phone:
+      - Phone
+      - Contact Phone
+      - Telephone
+      - Phone Number
+      - Emergency Phone
+    email:
+      - Vendor Email
+      - Contact Email
+      - Email
+      - Emergency Email
+      - E-mail
