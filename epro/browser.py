@@ -167,18 +167,30 @@ def _chromium_installed() -> bool:
 
 def ensure_browser_installed(log=None) -> None:
     """Install Playwright Chromium on first use. Idempotent."""
-    if getattr(sys, "frozen", False):
-        return
+    from epro.paths import app_root
+
+    if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(app_root() / "ms-playwright")
     if _chromium_installed():
         return
     if log:
         log("Setting up browser (one-time download, ~120 MB)…")
-    cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
+    Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]).mkdir(parents=True, exist_ok=True)
+    if getattr(sys, "frozen", False):
+        from playwright._impl._driver import compute_driver_executable
+
+        driver = compute_driver_executable()
+        if isinstance(driver, (tuple, list)):
+            cmd = [str(part) for part in driver] + ["install", "chromium"]
+        else:
+            cmd = [str(driver), "install", "chromium"]
+    else:
+        cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except FileNotFoundError as e:
         raise RuntimeError(
-            "Could not invoke `python -m playwright install chromium`."
+            "Could not install Playwright Chromium. Re-download the release zip."
         ) from e
     if result.returncode != 0:
         tail = (result.stderr or result.stdout or "").strip().splitlines()[-5:]

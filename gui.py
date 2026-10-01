@@ -28,17 +28,10 @@ from PySide6.QtWidgets import (
 
 from epro.checkpoint import clear_progress, has_progress, load_meta
 from epro.config import default_site, resolve_state
+from epro.paths import prepare_runtime
 from epro.pipeline import run_batch
 
-
-def _prepare_app_dir() -> None:
-    root = Path(__file__).resolve().parent
-    os.chdir(root)
-    if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(root / ".playwright")
-
-
-_prepare_app_dir()
+prepare_runtime()
 
 DARK_STYLE = """
 QMainWindow {

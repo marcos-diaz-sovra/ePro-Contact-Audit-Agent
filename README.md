@@ -2,14 +2,18 @@
 
 Desktop app that scrapes public Periscope/ePro purchase-order pages, reads Agency Attachments, and lists supplier contacts that are **not** already on the vendor profile.
 
-## Install (Windows)
+## Windows app
 
-1. Unzip the release.
+Unzip **eProContactAudit** and double-click **`eProContactAudit.exe`**. Keep the whole folder together; the `.exe` will not run if you copy it out by itself.
+
+The first release zip already includes Chromium. Results go to `outputs` next to the `.exe`.
+
+## Source install (developers)
+
+1. Unzip the source release, or clone the repo.
 2. Double-click **`run.bat`**.
 
-That is the whole setup. The first launch downloads a local Python runtime, the app packages, and Chromium. You do **not** need to install Python or add anything to PATH. Later launches skip setup and open the app.
-
-If Windows shows a SmartScreen prompt, choose **More info** → **Run anyway** (the script only installs into this folder).
+That first launch downloads a local Python runtime, packages, and Chromium into the folder. You do **not** need to install Python or add anything to PATH. Later launches skip setup and open the app.
 
 ## Use
 
