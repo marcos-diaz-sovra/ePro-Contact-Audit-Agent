@@ -1,0 +1,50 @@
+name: Build macOS app
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build app bundle
+        run: python -m PyInstaller --noconfirm --clean eProContactAudit.spec
+
+      - name: Bundle Chromium beside the app
+        run: |
+          set -euo pipefail
+          STAGE="${RUNNER_TEMP}/eProContactAudit-macos"
+          rm -rf "${STAGE}"
+          mkdir -p "${STAGE}"
+          cp -R dist/eProContactAudit.app "${STAGE}/"
+          export PLAYWRIGHT_BROWSERS_PATH="${STAGE}/ms-playwright"
+          python -m playwright install chromium
+          cat > "${STAGE}/README.txt" << 'EOF'
+          ePro Contact Audit Agent (macOS)
+          =================================
+          Double-click eProContactAudit.app.
+
+          Keep this whole folder together. Do not move the app out by itself.
+          The first time macOS blocks it: right-click the app, choose Open, then Open again.
+
+          Results are written to an outputs folder next to the app.
+          EOF
+          cd "${RUNNER_TEMP}"
+          ditto -c -k --keepParent "$(basename "${STAGE}")" "${GITHUB_WORKSPACE}/eProContactAudit-macos.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eProContactAudit-macos
+          path: eProContactAudit-macos.zip
+          retention-days: 14

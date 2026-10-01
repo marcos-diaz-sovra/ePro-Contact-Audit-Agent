@@ -2,11 +2,15 @@
 
 Desktop app that scrapes public Periscope/ePro purchase-order pages, reads Agency Attachments, and lists supplier contacts that are **not** already on the vendor profile.
 
-## Windows app
+## Windows
 
-Unzip **eProContactAudit** and double-click **`eProContactAudit.exe`**. Keep the whole folder together; the `.exe` will not run if you copy it out by itself.
+Unzip **eProContactAudit** and double-click **`eProContactAudit.exe`**. Keep the whole folder together; the `.exe` will not run if you copy it out by itself. Chromium is already included. Results go to `outputs` next to the `.exe`.
 
-The first release zip already includes Chromium. Results go to `outputs` next to the `.exe`.
+## macOS
+
+macOS does not run `.exe` files. Unzip **eProContactAudit-macos** and double-click **`eProContactAudit.app`**. Keep `ms-playwright` in the same folder as the app.
+
+The first time macOS blocks an unsigned app: right-click **eProContactAudit.app**, choose **Open**, then **Open** again. Results go to `outputs` next to the app.
 
 ## Source install (developers)
 

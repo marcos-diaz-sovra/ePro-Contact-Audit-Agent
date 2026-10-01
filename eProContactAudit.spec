@@ -1,4 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
+
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 pw_datas, pw_binaries, pw_hidden = collect_all("playwright")
@@ -73,3 +75,10 @@ coll = COLLECT(
     upx=False,
     name="eProContactAudit",
 )
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="eProContactAudit.app",
+        bundle_identifier="com.mdfcommerce.eprocontactaudit",
+    )

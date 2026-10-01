@@ -8,9 +8,16 @@ from pathlib import Path
 
 
 def app_root() -> Path:
-    """Folder that holds the .exe (or the project root when running from source)."""
+    """Writable folder next to the app (outputs, Chromium).
+
+    Windows: the folder that contains eProContactAudit.exe.
+    macOS .app: the folder that contains eProContactAudit.app, not Contents/MacOS.
+    """
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        exe = Path(sys.executable).resolve()
+        if exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents":
+            return exe.parents[3]
+        return exe.parent
     return Path(__file__).resolve().parent.parent
 
 
