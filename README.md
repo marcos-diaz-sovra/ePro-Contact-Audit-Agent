@@ -34,6 +34,12 @@ Results are written to `outputs\`:
 - `contact_audit_YYYYMMDD_HHMMSS.xlsx` — All_Contracts + Discrepancies
 - `contact_audit_in_progress.xlsx` — refreshed while a run is still going
 
+## Updates
+
+The packaged app checks GitHub on startup. When a newer release exists, an **Update** button appears. It downloads the build for this computer, restarts, and replaces the installed app. Saved audit progress in `outputs` is left in place.
+
+Each release must include a zip whose name contains `windows` or `macos`.
+
 Hybrid / LLM extract modes need an Anthropic API key. Regex mode does not.
 
 ## CLI (after the first GUI launch)

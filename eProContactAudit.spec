@@ -25,6 +25,7 @@ hiddenimports = list(pw_hidden) + [
     "epro.models",
     "epro.urls",
     "epro.checkpoint",
+    "epro.update",
     "yaml",
     "openpyxl",
     "pdfplumber",

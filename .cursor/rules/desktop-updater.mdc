@@ -1,0 +1,16 @@
+---
+description: Packaged desktop apps check GitHub releases on startup and update in place. Use when shipping, packaging, or changing a Windows or macOS desktop tool that users install from GitHub.
+alwaysApply: true
+---
+
+# Desktop release updater
+
+Packaged Windows and macOS tools update themselves from GitHub releases. Do not make users re-download from the repo after the first install.
+
+- Keep one version in the package (`__version__`), matching the release tag without the `v`.
+- On startup, check `repos/{owner}/{repo}/releases/latest`. Offer an update only when the tag is newer.
+- Ship one zip per platform. The file name must contain `windows` or `macos`.
+- Ask before installing. Download in the background. A helper waits until the app exits, then replaces the install and relaunches.
+- Do not delete `outputs` or saved progress while copying the new build.
+- If macOS App Translocation makes the running copy read-only, install the new app under `~/Applications` and open that copy.
+- Source checkouts show the release page. They are not overwritten.

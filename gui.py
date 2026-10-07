@@ -24,9 +24,11 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextEdit,
     QVBoxLayout,
+    QMessageBox,
     QWidget,
 )
 
+from epro import __version__
 from epro.checkpoint import clear_progress, has_progress, load_meta
 from epro.config import default_site, resolve_state
 from epro.paths import prepare_runtime
@@ -99,7 +101,26 @@ QComboBox QAbstractItemView {
     selection-color: #1e1e2e;
     outline: none;
 }
-QPushButton#process-btn {
+QPushButton#update-btn {
+    background-color: #f9e2af;
+    color: #1e1e2e;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: bold;
+}
+QPushButton#update-btn:hover {
+    background-color: #fbecc4;
+}
+QPushButton#update-btn:disabled {
+    background-color: #45475a;
+    color: #6c7086;
+}
+QLabel#update-label {
+    color: #f9e2af;
+    font-size: 13px;
+}
     background-color: #89b4fa;
     color: #1e1e2e;
     border: none;
@@ -256,10 +277,47 @@ class AuditWorker(QThread):
             self.finished_signal.emit("error", str(e))
 
 
+class UpdateCheckWorker(QThread):
+    found = Signal(object)
+
+    def run(self):
+        try:
+            from epro.update import check_for_update
+
+            self.found.emit(check_for_update())
+        except Exception as e:
+            self.found.emit(e)
+
+
+class UpdateDownloadWorker(QThread):
+    progress = Signal(int, int)
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, offer, parent=None):
+        super().__init__(parent)
+        self.offer = offer
+
+    def run(self):
+        try:
+            from epro.paths import support_dir
+            from epro.update import download_update
+
+            dest = support_dir() / self.offer.asset_name
+            download_update(
+                self.offer,
+                dest,
+                on_progress=lambda done, total: self.progress.emit(done, total),
+            )
+            self.finished_ok.emit(str(dest))
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ePro Contact Audit Agent")
+        self.setWindowTitle(f"ePro Contact Audit Agent {__version__}")
         self.resize(860, 720)
         self.setStyleSheet(DARK_STYLE)
         self.worker: AuditWorker | None = None
@@ -274,6 +332,8 @@ class MainWindow(QMainWindow):
         self._build()
         self._load_gui_state()
         self._refresh_resume_state()
+        self._offer = None
+        self._start_update_check()
 
     def _build(self):
         root = QWidget()
@@ -293,6 +353,19 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("subtitle")
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
+
+        self.update_row = QWidget()
+        update_layout = QHBoxLayout(self.update_row)
+        update_layout.setContentsMargins(0, 0, 0, 0)
+        self.update_label = QLabel("")
+        self.update_label.setObjectName("update-label")
+        update_layout.addWidget(self.update_label, stretch=1)
+        self.update_btn = QPushButton("Update")
+        self.update_btn.setObjectName("update-btn")
+        self.update_btn.clicked.connect(self._on_update_clicked)
+        update_layout.addWidget(self.update_btn)
+        self.update_row.hide()
+        layout.addWidget(self.update_row)
 
         sep = QFrame()
         sep.setObjectName("separator")
@@ -382,6 +455,77 @@ class MainWindow(QMainWindow):
         bottom.addWidget(clear_btn)
         bottom.addStretch()
         layout.addLayout(bottom)
+
+    def _start_update_check(self):
+        self._update_check = UpdateCheckWorker(self)
+        self._update_check.found.connect(self._on_update_found)
+        self._update_check.start()
+
+    def _on_update_found(self, result):
+        from epro.update import UpdateOffer
+
+        if isinstance(result, Exception):
+            return
+        if not isinstance(result, UpdateOffer):
+            return
+        self._offer = result
+        self.update_label.setText(f"Version {result.version} is available.")
+        self.update_row.show()
+
+    def _on_update_clicked(self):
+        if self.worker and self.worker.isRunning():
+            self.log_area.append("Stop the current audit before updating.\n")
+            return
+        if not getattr(sys, "frozen", False):
+            import webbrowser
+
+            webbrowser.open(
+                "https://github.com/marcos-diaz-sovra/ePro-Contact-Audit-Agent/releases/latest"
+            )
+            self.log_area.append("Opened the latest release. Source checkouts are not replaced in place.\n")
+            return
+        self.update_btn.setEnabled(False)
+        self.update_btn.setText("Downloading…")
+        self.log_area.append(f"Downloading version {self._offer.version}…")
+        self._update_download = UpdateDownloadWorker(self._offer, self)
+        self._update_download.progress.connect(self._on_update_progress)
+        self._update_download.finished_ok.connect(self._on_update_downloaded)
+        self._update_download.failed.connect(self._on_update_failed)
+        self._update_download.start()
+
+    def _on_update_progress(self, done: int, total: int):
+        pct = int(done * 100 / total) if total else 0
+        self.update_btn.setText(f"{pct}%")
+
+    def _on_update_failed(self, message: str):
+        self.update_btn.setEnabled(True)
+        self.update_btn.setText("Update")
+        self.log_area.append(f"Update download failed: {message}\n")
+
+    def _on_update_downloaded(self, zip_path: str):
+        from epro.update import extract_payload, install_target, launch_swap
+
+        try:
+            source = extract_payload(Path(zip_path))
+            dest, relaunch = install_target()
+        except Exception as e:
+            self._on_update_failed(str(e))
+            return
+        note = ""
+        if "AppTranslocation" in str(Path(sys.executable).resolve()):
+            note = f"\n\nmacOS protected this copy, so the new version will be installed at:\n{dest}"
+        answer = QMessageBox.question(
+            self,
+            "Update",
+            f"Install version {self._offer.version} and restart?{note}",
+        )
+        if answer != QMessageBox.Yes:
+            self.update_btn.setEnabled(True)
+            self.update_btn.setText("Update")
+            return
+        launch_swap(source, dest, relaunch)
+        self.log_area.append("The app will close and reopen with the new version.")
+        QApplication.instance().quit()
 
     def _on_browse(self):
         path, _ = QFileDialog.getOpenFileName(
