@@ -167,15 +167,25 @@ def _chromium_installed() -> bool:
 
 def ensure_browser_installed(log=None) -> None:
     """Install Playwright Chromium on first use. Idempotent."""
-    from epro.paths import app_root
+    from epro.paths import data_dir, seed_browsers
 
-    if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(app_root() / "ms-playwright")
+    browsers = data_dir() / "ms-playwright"
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
     if _chromium_installed():
         return
     if log:
+        log(f"Browser cache: {browsers}")
+    try:
+        if seed_browsers(browsers):
+            if log:
+                log("Using the browser shipped with the app.")
+            return
+    except OSError as e:
+        if log:
+            log(f"Could not copy the shipped browser ({e}). Downloading instead.")
+    if log:
         log("Setting up browser (one-time download, ~120 MB)…")
-    Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]).mkdir(parents=True, exist_ok=True)
+    browsers.mkdir(parents=True, exist_ok=True)
     if getattr(sys, "frozen", False):
         from playwright._impl._driver import compute_driver_executable
 

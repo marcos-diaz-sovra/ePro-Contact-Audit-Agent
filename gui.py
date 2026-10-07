@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -555,7 +556,13 @@ class MainWindow(QMainWindow):
 
     def _on_open_output(self):
         self._output_dir.mkdir(exist_ok=True)
-        os.startfile(str(self._output_dir.resolve()))
+        folder = str(self._output_dir.resolve())
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", folder])
+        elif sys.platform == "win32":
+            os.startfile(folder)
+        else:
+            subprocess.Popen(["xdg-open", folder])
 
     def _gui_state_path(self) -> Path:
         return self._output_dir / ".gui_state.json"

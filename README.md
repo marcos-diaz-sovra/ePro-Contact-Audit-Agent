@@ -8,9 +8,13 @@ Unzip **eProContactAudit** and double-click **`eProContactAudit.exe`**. Keep the
 
 ## macOS
 
-macOS does not run `.exe` files. Unzip **eProContactAudit-macos** and double-click **`eProContactAudit.app`**. Keep `ms-playwright` in the same folder as the app.
+macOS does not run `.exe` files. Unzip **eProContactAudit-macos** and double-click **`eProContactAudit.app`**.
 
-The first time macOS blocks an unsigned app: right-click **eProContactAudit.app**, choose **Open**, then **Open** again. Results go to `outputs` next to the app.
+The first time macOS blocks an unsigned app: right-click **eProContactAudit.app**, choose **Open**, then **Open** again.
+
+Downloads are opened from a read-only folder. The app then saves the browser and results here:
+
+`~/Library/Application Support/ePro Contact Audit Agent/outputs`
 
 ## Source install (developers)
 

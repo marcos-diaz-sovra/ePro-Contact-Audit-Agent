@@ -21,24 +21,27 @@ jobs:
       - name: Build app bundle
         run: python -m PyInstaller --noconfirm --clean eProContactAudit.spec
 
-      - name: Bundle Chromium beside the app
+      - name: Bundle Chromium inside the app
         run: |
           set -euo pipefail
           STAGE="${RUNNER_TEMP}/eProContactAudit-macos"
           rm -rf "${STAGE}"
           mkdir -p "${STAGE}"
           cp -R dist/eProContactAudit.app "${STAGE}/"
-          export PLAYWRIGHT_BROWSERS_PATH="${STAGE}/ms-playwright"
+          # Inside the .app so App Translocation still includes Chromium.
+          export PLAYWRIGHT_BROWSERS_PATH="${STAGE}/eProContactAudit.app/Contents/Resources/ms-playwright"
+          mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}"
           python -m playwright install chromium
           cat > "${STAGE}/README.txt" << 'EOF'
           ePro Contact Audit Agent (macOS)
           =================================
           Double-click eProContactAudit.app.
 
-          Keep this whole folder together. Do not move the app out by itself.
           The first time macOS blocks it: right-click the app, choose Open, then Open again.
 
-          Results are written to an outputs folder next to the app.
+          If macOS opens the app from a protected folder, results and the browser
+          cache are saved to:
+          ~/Library/Application Support/ePro Contact Audit Agent/outputs
           EOF
           cd "${RUNNER_TEMP}"
           ditto -c -k --keepParent "$(basename "${STAGE}")" "${GITHUB_WORKSPACE}/eProContactAudit-macos.zip"
