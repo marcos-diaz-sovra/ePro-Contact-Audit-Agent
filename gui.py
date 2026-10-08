@@ -121,6 +121,7 @@ QLabel#update-label {
     color: #f9e2af;
     font-size: 13px;
 }
+QPushButton#process-btn {
     background-color: #89b4fa;
     color: #1e1e2e;
     border: none;

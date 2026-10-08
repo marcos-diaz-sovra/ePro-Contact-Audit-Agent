@@ -5,6 +5,34 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 
+def json_safe(value):
+    """Turn spreadsheet values into something json.dumps can write."""
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        return "" if value != value else value
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(item) for item in value]
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            text = isoformat()
+        except (TypeError, ValueError, OverflowError):
+            return ""
+        return text if isinstance(text, str) else str(text)
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            converted = item()
+        except (TypeError, ValueError):
+            converted = value
+        if converted is not value:
+            return json_safe(converted)
+    return str(value)
+
+
 @dataclass
 class Contact:
     name: str = ""
@@ -45,7 +73,7 @@ class ContractAudit:
     new_contacts: list[Contact] = field(default_factory=list)
 
     def as_log_dict(self) -> dict:
-        return {
+        return json_safe({
             "contract_id": self.contract_id,
             "extras": self.extras,
             "po_url": self.po_url,
@@ -58,7 +86,7 @@ class ContractAudit:
             "match_status": self.match_status,
             "notes": self.notes,
             "error": self.error,
-        }
+        })
 
     @classmethod
     def from_log_dict(cls, data: dict) -> "ContractAudit":
