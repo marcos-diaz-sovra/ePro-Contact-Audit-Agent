@@ -18,9 +18,16 @@ Write-Host "Building .exe..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
 $Dist = Join-Path $Root "dist\eProContactAudit"
-if (-not (Test-Path (Join-Path $Dist "eProContactAudit.exe"))) {
+$BuiltExe = Join-Path $Dist "eProContactAudit.exe"
+if (-not (Test-Path $BuiltExe)) {
     throw "Build finished but eProContactAudit.exe was not found in $Dist"
 }
+$AppExe = Join-Path $Dist "eProContactAudit-app.exe"
+if (Test-Path $AppExe) { Remove-Item $AppExe -Force }
+Rename-Item $BuiltExe "eProContactAudit-app.exe"
+$Csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+& $Csc /nologo /target:winexe /r:System.Windows.Forms.dll "/out:$BuiltExe" (Join-Path $Root "packaging\windows_launcher.cs")
+if ($LASTEXITCODE -ne 0) { throw "Windows launcher compile failed" }
 
 Write-Host "Bundling Chromium next to the .exe..." -ForegroundColor Cyan
 $Browsers = Join-Path $Dist "ms-playwright"
@@ -36,10 +43,12 @@ Copy-Item -Recurse $TempBrowsers $Browsers
 $Readme = @"
 ePro Contact Audit Agent
 ========================
-Double-click eProContactAudit.exe.
+Right-click the zip, choose Extract All, then double-click eProContactAudit.exe.
 
-Keep this whole folder together — do not move the .exe out by itself.
-Outputs are written to an outputs folder next to the .exe.
+Do not run the app from inside the zip. Windows leaves the rest of the files behind and shows "Failed to load Python DLL".
+
+Keep this whole folder together. Do not move the .exe out by itself.
+The app checks GitHub when it opens. When a newer version exists, click Update.
 "@
 Set-Content -Path (Join-Path $Dist "README.txt") -Value $Readme -Encoding UTF8
 

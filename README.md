@@ -4,7 +4,11 @@ Desktop app that scrapes public Periscope/ePro purchase-order pages, reads Agenc
 
 ## Windows
 
-Unzip **eProContactAudit** and double-click **`eProContactAudit.exe`**. Keep the whole folder together; the `.exe` will not run if you copy it out by itself. Chromium is already included. Results go to `outputs` next to the `.exe`.
+Right-click **eProContactAudit-windows.zip**, choose **Extract All**, then open the new folder and double-click **`eProContactAudit.exe`**.
+
+Do not double-click the app while you are still looking inside the zip. Windows unpacks only that one file and then reports `Failed to load Python DLL`.
+
+Keep the whole folder together; the `.exe` will not run if you copy it out by itself. Chromium is already included. Results go to `outputs` next to the `.exe`.
 
 ## macOS
 
