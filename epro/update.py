@@ -149,8 +149,16 @@ def extract_payload(zip_path: Path) -> Path:
     if stage.exists():
         shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(zip_path) as archive:
-        archive.extractall(stage)
+    if sys.platform == "darwin":
+        # Python's zip extractor drops symlinks inside a Mac .app, so the
+        # relaunched copy never opens. ditto keeps the bundle intact.
+        subprocess.run(
+            ["/usr/bin/ditto", "-x", "-k", str(zip_path), str(stage)],
+            check=True,
+        )
+    else:
+        with zipfile.ZipFile(zip_path) as archive:
+            archive.extractall(stage)
     return _payload_root(stage)
 
 
@@ -197,13 +205,26 @@ def launch_swap(source: Path, dest: Path, relaunch: str) -> None:
         )
         return
     script = helper_dir / "apply-update.sh"
-    script.write_text(_POSIX_HELPER, encoding="utf-8")
+    script.write_text(_POSIX_HELPER.replace("\r\n", "\n").replace("\r", "\n"), encoding="utf-8", newline="\n")
     script.chmod(0o755)
-    subprocess.Popen(
-        ["bash", str(script), str(pid), str(source), str(dest), relaunch],
+    log = helper_dir / "update.log"
+    # The wrapper exits as soon as it has spawned a detached copy of itself.
+    # Waiting for that exit, before this app quits, keeps macOS from killing
+    # the installer along with the window.
+    wrapper = subprocess.Popen(
+        ["/bin/bash", str(script), str(log), str(pid), str(source), str(dest), relaunch],
         start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         close_fds=True,
     )
+    try:
+        code = wrapper.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        code = 0
+    if code != 0:
+        raise RuntimeError(f"The update helper stopped before it could detach. See {log}")
 
 
 _WINDOWS_HELPER = r"""
@@ -224,16 +245,35 @@ Start-Process -FilePath $Relaunch
 
 _POSIX_HELPER = r"""
 #!/bin/bash
-set -euo pipefail
-PROC_ID="$1"
-SOURCE="$2"
-DEST="$3"
-RELAUNCH="$4"
+LOG="$1"
+PROC_ID="$2"
+SOURCE="$3"
+DEST="$4"
+RELAUNCH="$5"
+if [[ "${UPDATE_DETACHED:-}" != "1" ]]; then
+  export UPDATE_DETACHED=1
+  /usr/bin/nohup /bin/bash "$0" "$@" >> "$LOG" 2>&1 &
+  exit 0
+fi
+echo "----- $(date) -----"
+echo "waiting for $PROC_ID"
 while kill -0 "$PROC_ID" 2>/dev/null; do
-    sleep 0.4
+  sleep 0.4
 done
+echo "parent exited"
 mkdir -p "$(dirname "$DEST")"
 rm -rf "$DEST"
-cp -R "$SOURCE" "$DEST"
-open "$RELAUNCH"
+if ! /usr/bin/ditto "$SOURCE" "$DEST"; then
+  echo "ditto failed"
+  /usr/bin/osascript -e 'display dialog "The update could not be installed. Download the latest release from GitHub and open that copy." buttons {"OK"} with icon caution'
+  exit 1
+fi
+/usr/bin/xattr -dr com.apple.quarantine "$DEST" || true
+echo "copied to $DEST"
+if ! /usr/bin/open "$RELAUNCH"; then
+  echo "open failed"
+  /usr/bin/osascript -e "display dialog \"The new version is at ${DEST}. Right-click the app and choose Open.\" buttons {\"OK\"}"
+  exit 1
+fi
+echo "opened $RELAUNCH"
 """

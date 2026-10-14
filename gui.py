@@ -43,6 +43,9 @@ QMainWindow {
 QLabel {
     color: #cdd6f4;
 }
+QMessageBox QLabel {
+    color: #1e1e2e;
+}
 QLabel#title {
     font-size: 20px;
     font-weight: bold;
@@ -515,16 +518,22 @@ class MainWindow(QMainWindow):
         note = ""
         if "AppTranslocation" in str(Path(sys.executable).resolve()):
             note = f"\n\nmacOS protected this copy, so the new version will be installed at:\n{dest}"
-        answer = QMessageBox.question(
-            self,
-            "Update",
-            f"Install version {self._offer.version} and restart?{note}",
-        )
-        if answer != QMessageBox.Yes:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Update")
+        box.setText(f"Install version {self._offer.version} and restart?{note}")
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setStyleSheet("QLabel { color: #1e1e2e; font-size: 13px; }")
+        answer = box.exec()
+        if answer != QMessageBox.StandardButton.Yes:
             self.update_btn.setEnabled(True)
             self.update_btn.setText("Update")
             return
-        launch_swap(source, dest, relaunch)
+        try:
+            launch_swap(source, dest, relaunch)
+        except Exception as e:
+            self._on_update_failed(str(e))
+            return
         self.log_area.append("The app will close and reopen with the new version.")
         QApplication.instance().quit()
 

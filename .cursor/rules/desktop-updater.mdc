@@ -13,5 +13,6 @@ Packaged Windows and macOS tools update themselves from GitHub releases. Do not 
 - Ask before installing. Download in the background. A helper waits until the app exits, then replaces the install and relaunches.
 - Do not delete `outputs` or saved progress while copying the new build.
 - If macOS App Translocation makes the running copy read-only, install the new app under `~/Applications` and open that copy.
+- On macOS, extract and copy the `.app` with `ditto`, not Python's zip extractor or `cp`. The helper must detach with `nohup` and the app must wait for that detach before quitting, or the installer dies with the window.
 - Source checkouts show the release page. They are not overwritten.
 - On Windows, the file named `eProContactAudit.exe` is a small launcher. The PyInstaller program is `eProContactAudit-app.exe` beside `_internal`. Running the app from inside the zip extracts only one file, so the launcher tells the user to Extract All.
