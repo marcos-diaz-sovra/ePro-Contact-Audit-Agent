@@ -83,24 +83,26 @@ def bundled_browser_dir() -> Path | None:
 
 
 def seed_browsers(dest: Path) -> bool:
-    """Copy bundled Chromium into a writable cache. Returns True if Chromium is there."""
-    if any(dest.glob("chromium*")):
-        return True
+    """Copy bundled Chromium into a writable cache. Returns True if a browser folder was copied or is already the bundle."""
     source = bundled_browser_dir()
     if source is None:
         return False
     if source.resolve() == dest.resolve():
         return True
     dest.mkdir(parents=True, exist_ok=True)
+    copied = False
     for child in source.iterdir():
         if child.name in {"__dirlock", ".write_test"}:
             continue
         target = dest / child.name
+        if target.exists():
+            continue
         if child.is_dir():
             shutil.copytree(child, target, dirs_exist_ok=True)
         else:
             shutil.copy2(child, target)
-    return any(dest.glob("chromium*"))
+        copied = True
+    return copied or any(dest.glob("chromium*"))
 
 
 def prepare_runtime() -> Path:

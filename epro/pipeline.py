@@ -129,11 +129,15 @@ async def run_batch(
     rows = df.to_dict(orient="records")
     if limit is not None:
         rows = rows[: max(0, int(limit))]
+    rows, skipped = _unique_contract_rows(rows, id_col)
 
     site = state or _site_from_rows(rows, id_col)
     site_url = str(site.get("base_url") or "")
     contract_timeout = max(90, int(timeout) * 4)
     _log(f"Loaded {len(rows)} contract(s) from {input_path.name}")
+    if skipped:
+        _log(f"Skipped {skipped} repeated contract ID row(s). Each contract is audited once.")
+    _log("There is no row limit. Leave Limit blank to run the whole list. Stop and Resume keep your place.")
     _log(f"ePro site: {site_url} (.{site.get('ext')})")
     _log(f"Extract mode: {extract_mode}")
     ensure_browser_installed(log=_log)
@@ -193,10 +197,10 @@ async def run_batch(
                         contract_id=cid,
                         extras=extra,
                         match_status=ERROR,
-                        error=str(e),
+                        error=_short_error(e),
                     )
-                    audit.notes.append(str(e))
-                    _log(f"  ERROR: {e}")
+                    audit.notes.append(_short_error(e))
+                    _log(f"  ERROR: {_short_error(e)}")
                     try:
                         await restart_browser()
                         processed_since_recycle = 0
@@ -394,6 +398,31 @@ async def process_contract(
             await context.close()
         except Exception:
             pass
+
+
+def _unique_contract_rows(rows: list[dict], id_col: str) -> tuple[list[dict], int]:
+    """Keep the first spreadsheet row for each contract ID."""
+    seen: set[str] = set()
+    unique: list[dict] = []
+    skipped = 0
+    for row in rows:
+        cid = str(row.get(id_col) or "").strip()
+        key = cid.lower()
+        if key and key != "nan":
+            if key in seen:
+                skipped += 1
+                continue
+            seen.add(key)
+        unique.append(row)
+    return unique, skipped
+
+
+def _short_error(exc: BaseException) -> str:
+    text = str(exc).strip()
+    if "Executable doesn't exist" in text:
+        return "The browser for this app is missing. Open the app again so it can finish setup, then run the list."
+    line = text.splitlines()[0] if text else type(exc).__name__
+    return line[:500]
 
 
 def _find_id_column(df: pd.DataFrame) -> str:

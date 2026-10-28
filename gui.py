@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QMessageBox,
@@ -212,7 +213,7 @@ QTextEdit {
     border-radius: 6px;
     padding: 8px;
     font-family: 'Cascadia Code', 'Consolas', monospace;
-    font-size: 12px;
+    font-size: 13px;
 }
 QFrame#separator {
     background-color: #313244;
@@ -356,6 +357,7 @@ class MainWindow(QMainWindow):
         )
         subtitle.setObjectName("subtitle")
         subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
         self.update_row = QWidget()
@@ -410,7 +412,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Limit (optional)"))
         self.limit_input = QLineEdit()
-        self.limit_input.setPlaceholderText("Leave blank to process the whole list")
+        self.limit_input.setPlaceholderText("Blank runs every row. There is no maximum.")
         layout.addWidget(self.limit_input)
 
         btn_row = QHBoxLayout()
@@ -445,6 +447,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Log"))
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
+        self.log_area.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.log_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.log_area.setMinimumHeight(180)
+        self.log_area.document().setMaximumBlockCount(4000)
         layout.addWidget(self.log_area, stretch=1)
 
         self.output_label = QLabel("")
@@ -651,24 +657,16 @@ class MainWindow(QMainWindow):
         now = time.monotonic()
         if self._stop_requested and now >= self._stop_deadline:
             self.log_area.append(
-                "The current scrape did not unwind. Force-stopping. Finished contracts are saved."
+                "The current contract is still closing. The window will stay open. Finished contracts are already saved."
             )
-            try:
-                self.worker.terminate()
-                self.worker.wait(4000)
-            except Exception:
-                pass
-            self._after_force_stop()
+            self._stop_deadline = now + 60
             return
         silent = now - self._last_log_at
         if silent > 90 and not self._warned_stuck:
             self._warned_stuck = True
             self.log_area.append(
-                "No new log for 90s — this contract may be stuck. Click Stop to save progress and Resume later."
+                "No new log for 90s. The current contract is still running. A long list is normal; use Stop if you want to pause."
             )
-        if silent > 240 and not self._stop_requested:
-            self.log_area.append("Still no progress after 4 minutes. Stopping so you can Resume.")
-            self._on_stop()
 
     def _after_force_stop(self):
         self._watchdog.stop()

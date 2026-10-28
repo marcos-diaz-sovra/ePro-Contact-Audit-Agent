@@ -158,10 +158,34 @@ def _playwright_cache_dir() -> Path:
     return Path.home() / ".cache" / "ms-playwright"
 
 
+def _required_browser_dir() -> str | None:
+    """Folder name Playwright will launch, such as chromium_headless_shell-1248."""
+    import json
+
+    import playwright
+
+    manifest = Path(playwright.__file__).resolve().parent / "driver" / "package" / "browsers.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    for browser in data.get("browsers") or []:
+        if browser.get("name") == "chromium-headless-shell" and browser.get("installByDefault"):
+            revision = str(browser.get("revision") or "")
+            return f"chromium_headless_shell-{revision}" if revision else None
+    return None
+
+
 def _chromium_installed() -> bool:
     cache = _playwright_cache_dir()
     if not cache.exists():
         return False
+    required = _required_browser_dir()
+    if required:
+        folder = cache / required
+        return folder.is_dir() and any(folder.rglob("chrome-headless-shell*"))
     return any(p.name.startswith("chromium") for p in cache.iterdir())
 
 
@@ -175,8 +199,11 @@ def ensure_browser_installed(log=None) -> None:
         return
     if log:
         log(f"Browser cache: {browsers}")
+        required = _required_browser_dir()
+        if required:
+            log(f"Need {required}. An older browser in that folder is not used.")
     try:
-        if seed_browsers(browsers):
+        if seed_browsers(browsers) and _chromium_installed():
             if log:
                 log("Using the browser shipped with the app.")
             return
