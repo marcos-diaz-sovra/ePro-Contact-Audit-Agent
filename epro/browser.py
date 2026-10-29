@@ -114,7 +114,7 @@ _AGENCY_ATTACHMENTS_JS = """() => {
     return files;
 }"""
 
-_VENDOR_ID_PREFIX = re.compile(r"^(V\d+)\s*[-–]\s*(.+)$", re.IGNORECASE)
+_VENDOR_ID_PREFIX = re.compile(r"^([A-Z]?\d+)\s*[-–]\s*(.+)$", re.IGNORECASE)
 
 # Government-buyer fields on the PO page — never treat these as vendor contact.
 _IGNORE_LABELS = {
@@ -402,7 +402,14 @@ async def scrape_contract_contact(page, po_url: str, state: dict, timeout: int =
         vendor = _clean_vendor_name(vendor)
 
     contact = Contact(source="contract")
-    if mode == "vendor_profile":
+    # EPC exposes the vendor representative directly beside the PO's Vendor
+    # hyperlink. Its profile endpoint rejects a direct navigation, so following
+    # that link loses the otherwise complete public PO data.
+    if _is_epc_url(page.url or po_url):
+        epc_vendor, epc_contact = await _read_epc_vendor_contact(page)
+        vendor = epc_vendor or vendor
+        contact = epc_contact
+    elif mode == "vendor_profile":
         profile_href = (vendor_link or {}).get("href") or ""
         profile_fields, profile_err = await _scrape_vendor_profile(
             page,
@@ -421,6 +428,51 @@ async def scrape_contract_contact(page, po_url: str, state: dict, timeout: int =
         _, contact = contact_from_fields(fields, labels)
 
     return vendor, contact, files, "", att_err
+
+
+def _is_epc_url(url: str) -> bool:
+    return urlparse(url).netloc.lower() == "empireprocureconnect.com"
+
+
+async def _read_epc_vendor_contact(page) -> tuple[str, Contact]:
+    """Read EPC's contact printed directly beneath the public Vendor link."""
+    try:
+        raw = await page.locator("a[href*='viewExternalVendorProfile']").first.evaluate(
+            """link => {
+                const cell = link.closest('td');
+                return {
+                    vendor: (link.innerText || '').trim(),
+                    lines: (cell?.innerText || '').split(/\\n+/).map(x => x.trim()).filter(Boolean),
+                };
+            }"""
+        )
+    except Exception:
+        return "", Contact(source="contract")
+    vendor = _clean_vendor_name(str(raw.get("vendor") or ""))
+    lines = [str(line).strip() for line in raw.get("lines") or [] if str(line).strip()]
+    try:
+        start = lines.index(str(raw.get("vendor") or "").strip()) + 1
+    except ValueError:
+        start = 0
+    details = lines[start:]
+    blob = " ".join(details)
+    email_match = re.search(r"(?i)\bemail:\s*([^\s]+)", blob)
+    phone_match = re.search(r"(?i)\bphone:\s*([+\d(). -]{7,})", blob)
+    name = ""
+    for line in details:
+        if re.match(r"(?i)^(email|phone):", line):
+            break
+        if re.search(r"\d", line) or re.search(r"(?i)\b(p\.?o\.?|street|road|rd\.?|avenue|ave\.?|suite|building|box)\b", line):
+            break
+        if re.fullmatch(r"[A-Za-z][A-Za-z.' -]{1,80}", line):
+            name = line
+            break
+    return vendor, Contact(
+        name=name,
+        email=email_match.group(1).strip() if email_match else "",
+        phone=phone_match.group(1).strip() if phone_match else "",
+        source="contract",
+    )
 
 
 async def _read_vendor_link(page) -> dict | None:

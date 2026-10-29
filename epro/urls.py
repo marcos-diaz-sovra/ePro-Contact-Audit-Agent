@@ -19,10 +19,11 @@ def build_po_url(base_url: str, ext: str, contract_id: str) -> str:
     """Public purchase-order summary page for ``contract_id``."""
     root = _origin(base_url)
     suffix = ext.lstrip(".")
-    doc_id = quote(contract_id.strip(), safe="-_.")
+    doc_id = quote(_public_doc_id(root, contract_id), safe="-_.")
+    external = "&external=true" if _is_epc(root) else ""
     return (
         f"{root}/bso/external/purchaseorder/poSummary.{suffix}"
-        f"?docId={doc_id}&releaseNbr=0&parentUrl=close"
+        f"?docId={doc_id}{external}&releaseNbr=0&parentUrl=close"
     )
 
 
@@ -30,10 +31,11 @@ def build_attachments_url(base_url: str, ext: str, contract_id: str) -> str:
     """Public Attachments tab for ``contract_id`` (docType=P)."""
     root = _origin(base_url)
     suffix = ext.lstrip(".")
-    doc_id = quote(contract_id.strip(), safe="-_.")
+    doc_id = quote(_public_doc_id(root, contract_id), safe="-_.")
+    external = "&external=true" if _is_epc(root) else ""
     return (
         f"{root}/bso/document/attachments/attachments.{suffix}"
-        f"?docType=P&docId={doc_id}&releaseNbr=0"
+        f"?docType=P&docId={doc_id}{external}&releaseNbr=0"
     )
 
 
@@ -91,3 +93,15 @@ def _origin(base_url: str) -> str:
     scheme = parsed.scheme or "https"
     netloc = parsed.netloc or parsed.path.split("/")[0]
     return f"{scheme}://{netloc}".rstrip("/")
+
+
+def _is_epc(origin: str) -> bool:
+    return urlparse(origin).netloc.lower() == "empireprocureconnect.com"
+
+
+def _public_doc_id(origin: str, contract_id: str) -> str:
+    """EPC's public endpoint requires its numeric PO number padded to seven digits."""
+    value = contract_id.strip()
+    if _is_epc(origin) and value.isdigit():
+        return value.zfill(7)
+    return value
