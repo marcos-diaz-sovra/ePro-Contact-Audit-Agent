@@ -101,7 +101,7 @@ def _extract_pdf(path: Path) -> tuple[str, bool]:
             if not pages:
                 return "", True
             for page in pages:
-                page_text = page.extract_text() or ""
+                page_text = _page_text_without_strikethrough(page)
                 if page_text.strip():
                     text_parts.append(page_text)
                 else:
@@ -116,10 +116,109 @@ def _extract_docx(path: Path) -> str:
     try:
         from docx import Document
         doc = Document(path)
-        text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-        return text[:_MAX_CHARS]
+        chunks: list[str] = []
+        for paragraph in doc.paragraphs:
+            text = _docx_paragraph_text(paragraph)
+            if text.strip():
+                chunks.append(text)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        text = _docx_paragraph_text(paragraph)
+                        if text.strip():
+                            chunks.append(text)
+        return "\n".join(chunks)[:_MAX_CHARS]
     except Exception:
         return ""
+
+
+def _docx_paragraph_text(paragraph) -> str:
+    """Keep replacement text and drop runs that Word has struck through."""
+    parts: list[str] = []
+    for run in paragraph.runs:
+        font = run.font
+        if font.strike or font.double_strike:
+            continue
+        parts.append(run.text or "")
+    return "".join(parts)
+
+
+def _page_text_without_strikethrough(page) -> str:
+    """Drop PDF characters covered by a strikethrough line or StrikeOut annotation."""
+    boxes = _strike_boxes(page)
+    if not boxes:
+        return page.extract_text() or ""
+
+    def keep(obj) -> bool:
+        if obj.get("object_type") != "char":
+            return True
+        return not _char_struck(obj, boxes)
+
+    try:
+        return page.filter(keep).extract_text() or ""
+    except Exception:
+        return page.extract_text() or ""
+
+
+def _strike_boxes(page) -> list[tuple[float, float, float, float]]:
+    boxes: list[tuple[float, float, float, float]] = []
+    height = float(getattr(page, "height", 0) or 0)
+    for annot in page.annots or []:
+        subtype = str((annot.get("data") or {}).get("Subtype") or "")
+        if "Strike" not in subtype:
+            continue
+        boxes.extend(_annot_strike_boxes(annot, height))
+
+    chars = page.chars or []
+    for obj in list(page.lines or []) + list(page.rects or []):
+        x0, x1 = obj.get("x0"), obj.get("x1")
+        top, bottom = obj.get("top"), obj.get("bottom")
+        if None in (x0, x1, top, bottom):
+            continue
+        if abs(x1 - x0) < 8 or abs(bottom - top) > 2.5:
+            continue
+        mid = (float(top) + float(bottom)) / 2
+        if not any(_line_crosses_char(float(x0), float(x1), mid, char) for char in chars):
+            continue
+        boxes.append((min(float(x0), float(x1)), max(float(x0), float(x1)), mid - 3.5, mid + 3.5))
+    return boxes
+
+
+def _annot_strike_boxes(annot: dict, page_height: float) -> list[tuple[float, float, float, float]]:
+    """Use StrikeOut quad points so a padded annotation box does not cover the replacement."""
+    quads = (annot.get("data") or {}).get("QuadPoints") or []
+    try:
+        nums = [float(n) for n in quads]
+    except (TypeError, ValueError):
+        nums = []
+    boxes: list[tuple[float, float, float, float]] = []
+    if page_height and len(nums) >= 8:
+        for i in range(0, len(nums) - 7, 8):
+            xs = nums[i:i + 8:2]
+            ys = nums[i + 1:i + 8:2]
+            tops = [page_height - y for y in ys]
+            boxes.append((min(xs), max(xs), min(tops), max(tops)))
+        return boxes
+    return [(float(annot["x0"]), float(annot["x1"]), float(annot["top"]), float(annot["bottom"]))]
+
+
+def _line_crosses_char(x0: float, x1: float, mid: float, char: dict) -> bool:
+    height = abs(float(char["bottom"]) - float(char["top"])) or 1
+    center_y = (float(char["top"]) + float(char["bottom"])) / 2
+    if abs(mid - center_y) > height * 0.3:
+        return False
+    overlap = min(x1, float(char["x1"])) - max(x0, float(char["x0"]))
+    return overlap >= max(1, (float(char["x1"]) - float(char["x0"])) * 0.5)
+
+
+def _char_struck(char: dict, boxes: list[tuple[float, float, float, float]]) -> bool:
+    center_x = (float(char["x0"]) + float(char["x1"])) / 2
+    center_y = (float(char["top"]) + float(char["bottom"])) / 2
+    for x0, x1, top, bottom in boxes:
+        if min(x0, x1) - 0.4 <= center_x <= max(x0, x1) + 0.4 and min(top, bottom) - 0.4 <= center_y <= max(top, bottom) + 0.4:
+            return True
+    return False
 
 
 def _unique_name(dest_dir: Path, filename: str) -> str:

@@ -18,7 +18,7 @@ from epro.browser import (
     shutdown_browser,
 )
 from epro.checkpoint import append_audit, clear_progress, completed_keys, load_audits, row_key
-from epro.contacts import extract_contacts
+from epro.contacts import extract_contacts, scope_to_contract
 from epro.match import ERROR, compare
 from epro.models import Contact, ContractAudit
 from epro.report import write_outputs, write_workbook
@@ -377,13 +377,33 @@ async def process_contract(
         for f in files:
             if not f.text.strip():
                 continue
+            scoped = scope_to_contract(f.text, vendor_name=vendor, contract_id=contract_id)
+            if not scoped.strip():
+                audit.notes.append(f"{f.filename}: lists other vendors, not this contract")
+                continue
             contacts.extend(
-                extract_contacts(f.text, mode=extract_mode, source=f.filename, api_key=api_key)
+                extract_contacts(
+                    scoped,
+                    mode=extract_mode,
+                    source=f.filename,
+                    api_key=api_key,
+                    vendor_name=vendor,
+                    contract_id=contract_id,
+                )
             )
         if not contacts:
             blob = combined_text(files)
             if blob:
-                contacts = extract_contacts(blob, mode=extract_mode, source="attachments", api_key=api_key)
+                scoped = scope_to_contract(blob, vendor_name=vendor, contract_id=contract_id)
+                if scoped.strip():
+                    contacts = extract_contacts(
+                        scoped,
+                        mode=extract_mode,
+                        source="attachments",
+                        api_key=api_key,
+                        vendor_name=vendor,
+                        contract_id=contract_id,
+                    )
         audit.attachment_contacts = _dedupe_contacts(contacts)
         if log:
             log(

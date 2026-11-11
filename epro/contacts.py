@@ -21,12 +21,28 @@ _ID_MASK_RE = re.compile(
     re.IGNORECASE,
 )
 
+_FIELD_LABEL = r"(?:key\s+person(?:\s*#?\s*\d+)?|name|phone|e-?mail|title|fax)"
+_NAME_CAPTURE = (
+    r"([A-Z][A-Za-z.'\-]+(?:\s+(?!" + _FIELD_LABEL + r"\s*[:\-])[A-Z][A-Za-z.'\-]+){0,3})"
+)
+
 NAME_LABEL_RE = re.compile(
     r"(?i)(?:^|\n)\s*(?:"
     r"contact(?:\s+(?:name|person|rep(?:resentative)?))?|"
+    r"key\s+person(?:\s*#?\s*\d+)?|"
+    r"name|"
     r"representative|account\s+manager|vendor\s+rep(?:resentative)?|"
     r"attn|attention|prepared\s+by|submitted\s+by"
-    r")\s*[:\-]\s*([A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){0,4})"
+    r")\s*[:\-]\s*" + _NAME_CAPTURE
+)
+
+# Starts the next person block, including a "Name:" that shares a table row.
+_BLOCK_SPLIT_RE = re.compile(
+    r"(?i)(?:^|\n|\s)(?:key\s+person(?:\s*#?\s*\d+)?|name)\s*[:\-]"
+)
+
+_INLINE_NAME_RE = re.compile(
+    r"(?i)(?:^|\n|(?<=\s))name\s*[:\-]\s*" + _NAME_CAPTURE
 )
 
 _BAD_NAME = re.compile(
@@ -49,6 +65,7 @@ _NON_PERSON_WORDS = {
     "attachment", "guide", "buyers", "buyer", "supplier", "vendor", "information",
     "department", "division", "office", "program", "project", "section", "category",
     "price", "list", "table", "page", "phone", "fax", "email", "website", "available",
+    "name", "title", "person", "key",
     "including", "please", "contact", "customer", "support", "sales", "team", "group",
     "unit", "agency", "government", "executed", "master", "participating",
     "facilitator", "provider", "selection", "form", "template", "cost", "proposal",
@@ -66,22 +83,127 @@ DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 _MAX_LLM_CHARS = 8000
 
 
+# PO-10700-00058569 – Culinary Depot
+_AWARD_HEADING_RE = re.compile(
+    r"(?i)((?:PO|PA|MA|DOC)\s*[-–—]\s*\d[\d\-]*\s*[-–—]\s*[A-Z0-9][^\n]{1,120})"
+)
+_COMPANY_SUFFIX_RE = re.compile(
+    r"\b(incorporated|inc|l\.?l\.?c|llc|ltd|limited|corp|corporation|company|co)\b\.?",
+    re.IGNORECASE,
+)
+
+
+def scope_to_contract(text: str, *, vendor_name: str = "", contract_id: str = "") -> str:
+    """Keep the award block for this contract when one file lists several vendors.
+
+    A price-agreement attachment often prints every awarded company. Contacts for
+    the other companies are not part of this contract.
+    """
+    raw = text or ""
+    if not raw.strip() or not (vendor_name or contract_id):
+        return raw
+    matches = list(_AWARD_HEADING_RE.finditer(raw))
+    if len(matches) < 2:
+        return raw
+    sections: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(raw)
+        sections.append((match.group(1).strip(), raw[start:end]))
+
+    chosen = _sections_for_contract(sections, vendor_name=vendor_name, contract_id=contract_id)
+    if chosen is None:
+        return raw
+    return "\n\n".join(chosen)
+
+
+def _sections_for_contract(
+    sections: list[tuple[str, str]],
+    *,
+    vendor_name: str,
+    contract_id: str,
+) -> list[str] | None:
+    """Matching section bodies, [] when other vendors are listed, None to keep all text."""
+    id_hits = [body for heading, body in sections if _heading_matches_contract(heading, contract_id)]
+    if contract_id and 0 < len(id_hits) < len(sections):
+        return id_hits
+    vendor_hits = [body for heading, body in sections if _heading_matches_vendor(heading, vendor_name)]
+    if vendor_name and 0 < len(vendor_hits) < len(sections):
+        return vendor_hits
+    if contract_id or vendor_name:
+        return []
+    return None
+
+
+def _heading_matches_contract(heading: str, contract_id: str) -> bool:
+    if not contract_id:
+        return False
+    compact_id = re.sub(r"[^a-z0-9]", "", contract_id.lower())
+    compact_heading = re.sub(r"[^a-z0-9]", "", heading.lower())
+    if len(compact_id) >= 6 and compact_id in compact_heading:
+        return True
+    numbers = [part for part in re.split(r"[^A-Za-z0-9]+", contract_id) if part.isdigit() and len(part) >= 5]
+    if not numbers:
+        return False
+    tail = max(numbers, key=len)
+    return re.search(rf"(?<!\d){re.escape(tail)}(?!\d)", heading) is not None
+
+
+def _heading_matches_vendor(heading: str, vendor_name: str) -> bool:
+    if not vendor_name:
+        return False
+    company = _company_from_heading(heading)
+    vendor_tokens = _company_tokens(vendor_name)
+    company_tokens = _company_tokens(company)
+    if not vendor_tokens or not company_tokens:
+        return False
+    short, long = (
+        (vendor_tokens, company_tokens)
+        if len(vendor_tokens) <= len(company_tokens)
+        else (company_tokens, vendor_tokens)
+    )
+    if not short <= long:
+        return False
+    return max(len(token) for token in short) >= 4
+
+
+def _company_from_heading(heading: str) -> str:
+    match = re.search(r"(?i)\d[\d\-]*\s*[-–—]\s*(.+)$", heading.strip())
+    company = match.group(1) if match else heading
+    company = re.split(r"(?i)\b(?:name|phone|e-?mail|website|fax)\s*:", company)[0]
+    return company.strip(" .;-")
+
+
+def _company_tokens(name: str) -> set[str]:
+    text = (name or "").lower().replace("'", "").replace("’", "")
+    text = _COMPANY_SUFFIX_RE.sub(" ", text)
+    words = re.sub(r"[^a-z0-9]+", " ", text).split()
+    return {word for word in words if len(word) >= 3 and word not in {"the", "and", "for"}}
+
+
 def extract_contacts(
     text: str,
     *,
     mode: str = "hybrid",
     source: str = "",
     api_key: str | None = None,
+    vendor_name: str = "",
+    contract_id: str = "",
 ) -> list[Contact]:
     """Run regex / llm / hybrid extraction over attachment text."""
     mode = (mode or "hybrid").strip().lower()
+    text = scope_to_contract(text, vendor_name=vendor_name, contract_id=contract_id)
     if not (text or "").strip():
         return []
     if mode == "regex":
         return extract_regex(text, source=source)
     if mode == "llm":
-        return extract_llm(text, source=source, api_key=api_key)
-    return extract_hybrid(text, source=source, api_key=api_key)
+        return extract_llm(
+            text, source=source, api_key=api_key, vendor_name=vendor_name, contract_id=contract_id
+        )
+    return extract_hybrid(
+        text, source=source, api_key=api_key, vendor_name=vendor_name, contract_id=contract_id
+    )
 
 
 def extract_regex(text: str, source: str = "") -> list[Contact]:
@@ -130,6 +252,12 @@ def is_person_name(name: str) -> bool:
         lower = word.lower().rstrip(".")
         if lower in _NAME_PARTICLES:
             continue
+        # "Page" is a heading word and a real surname (Morgan Page).
+        if lower == "page":
+            if words[0].lower().rstrip(".") == "page":
+                return False
+            alpha += 1
+            continue
         if lower in _NON_PERSON_WORDS:
             return False
         if not re.fullmatch(r"[A-Z][a-z]+(?:['\-][A-Z]?[a-z]+)?|[A-Z]\.?", word):
@@ -139,7 +267,13 @@ def is_person_name(name: str) -> bool:
     return alpha >= 2
 
 
-def extract_llm(text: str, source: str = "", api_key: str | None = None) -> list[Contact]:
+def extract_llm(
+    text: str,
+    source: str = "",
+    api_key: str | None = None,
+    vendor_name: str = "",
+    contract_id: str = "",
+) -> list[Contact]:
     """Ask Claude for contacts as JSON. Returns [] if the API is unavailable."""
     key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
@@ -154,7 +288,14 @@ def extract_llm(text: str, source: str = "", api_key: str | None = None) -> list
         "category, heading, company, or job title as the name "
         '(not "Debris Monitoring", "State Procurement", "Public Policy").\n'
         "- Do not invent emails or phone numbers. Use empty string if missing.\n"
-        "- Skip government buyers (.gov / .mil emails) unless they are the only contact.\n"
+        "- Ignore struck-through or replaced text. When a name, phone, or email "
+        "is crossed out and a replacement is shown, keep only the replacement.\n"
+        "- A person who only changed company email or phone is still that same person, "
+        "not an additional contact.\n"
+        "- If several companies are listed, keep only the company awarded this contract. "
+        "Ignore contacts printed for the other companies.\n"
+        + _vendor_focus_rule(vendor_name, contract_id)
+        + "- Skip government buyers (.gov / .mil emails) unless they are the only contact.\n"
         "- Ignore mailing addresses, DUNS, FEIN, and contract numbers.\n\n"
         f"Source file: {source or 'attachment'}\n\n"
         f"{snippet}"
@@ -176,7 +317,13 @@ def extract_llm(text: str, source: str = "", api_key: str | None = None) -> list
     return _contacts_from_json(raw, source)
 
 
-def extract_hybrid(text: str, source: str = "", api_key: str | None = None) -> list[Contact]:
+def extract_hybrid(
+    text: str,
+    source: str = "",
+    api_key: str | None = None,
+    vendor_name: str = "",
+    contract_id: str = "",
+) -> list[Contact]:
     """Regex owns email/phone. LLM fills names and leftover blocks when needed."""
     regex_contacts = extract_regex(text, source=source)
     needs_llm = False
@@ -187,10 +334,20 @@ def extract_hybrid(text: str, source: str = "", api_key: str | None = None) -> l
     if not needs_llm:
         return regex_contacts
 
-    llm_contacts = extract_llm(text, source=source, api_key=api_key)
+    llm_contacts = extract_llm(
+        text, source=source, api_key=api_key, vendor_name=vendor_name, contract_id=contract_id
+    )
     if not regex_contacts:
         return [c for c in llm_contacts if is_person_name(c.name) or c.email]
     return _merge_hybrid(regex_contacts, llm_contacts)
+
+
+def _vendor_focus_rule(vendor_name: str, contract_id: str) -> str:
+    if not vendor_name and not contract_id:
+        return ""
+    who = vendor_name.strip() or "the awarded vendor"
+    number = f" ({contract_id.strip()})" if contract_id.strip() else ""
+    return f"- This contract is {who}{number}. Do not return anyone from another company.\n"
 
 
 def _merge_hybrid(regex_contacts: list[Contact], llm_contacts: list[Contact]) -> list[Contact]:
@@ -255,46 +412,83 @@ def _contacts_from_json(raw: str, source: str) -> list[Contact]:
 
 
 def _neighbors(text: str, needle: str) -> tuple[str, str]:
-    """Person name and valid phone from the window around an email or phone."""
+    """Person name and valid phone from the same person block as an email or phone."""
     idx = text.lower().find(needle.lower())
     if idx < 0:
         return "", ""
-    before = 420
-    after = 180
-    start = max(0, idx - before)
-    window = text[start: idx + len(needle) + after]
-    phone = ""
-    if "@" in needle:
-        phone_window = _ID_MASK_RE.sub(" ", window)
-        needle_at = idx - start
-        best: tuple[int, str] | None = None
-        for match in PHONE_RE.finditer(phone_window):
-            candidate = _normalize_phone_raw(match.group(0))
-            if not candidate:
-                continue
-            dist = abs(match.start() - needle_at)
-            if best is None or dist < best[0]:
-                best = (dist, candidate)
-        phone = best[1] if best else ""
+    start, end = _block_around(text, idx, len(needle))
+    window = text[start:end]
     name = _name_for_value(window, needle, idx - start)
+    phone = _phone_for_person(text, idx, needle, name) if "@" in needle else ""
     return name, phone
+
+
+def _block_around(text: str, idx: int, length: int) -> tuple[int, int]:
+    """Window around a value, cut off at the next person's name label."""
+    start = max(0, idx - 420)
+    end = min(len(text), idx + length + 180)
+    for match in _BLOCK_SPLIT_RE.finditer(text, idx + length, end):
+        end = match.start()
+        break
+    return start, end
+
+
+def _phone_for_person(text: str, email_idx: int, email: str, name: str) -> str:
+    """Phone that belongs to this person, not the next person in the same table."""
+    owner = name or _preceding_labelled_name(text, email_idx)
+    start, end = _block_around(text, email_idx, len(email))
+    phone_window = _ID_MASK_RE.sub(" ", text)
+    best: tuple[int, str] | None = None
+    for match in PHONE_RE.finditer(phone_window):
+        if match.start() < start or match.start() >= end:
+            continue
+        candidate = _normalize_phone_raw(match.group(0))
+        if not candidate:
+            continue
+        phone_owner = _preceding_labelled_name(text, match.start())
+        if owner and phone_owner and not _same_name_tokens(owner, phone_owner):
+            continue
+        dist = abs(match.start() - email_idx)
+        if best is None or dist < best[0]:
+            best = (dist, candidate)
+    return best[1] if best else ""
+
+
+def _preceding_labelled_name(text: str, idx: int) -> str:
+    """Last 'Name:' person at or before idx, including a second name on the same line."""
+    found = ""
+    for match in _INLINE_NAME_RE.finditer(text, 0, max(idx, 0) + 1):
+        if match.start() > idx:
+            break
+        candidate = _clean_name(match.group(1))
+        if is_person_name(candidate):
+            found = candidate
+    return found
+
+
+def _same_name_tokens(a: str, b: str) -> bool:
+    left = [w.lower().strip(".") for w in a.split()]
+    right = [w.lower().strip(".") for w in b.split()]
+    return left == right
 
 
 def _name_for_value(window: str, needle: str, needle_at: int) -> str:
     """Pick a person name near needle, preferring last names that match an email."""
     hints = _email_name_hints(needle) if "@" in needle else []
     labelled = []
-    for match in NAME_LABEL_RE.finditer(window):
-        candidate = _clean_name(match.group(1))
-        if is_person_name(candidate):
-            labelled.append((abs(match.start() - needle_at), candidate))
+    for pattern in (NAME_LABEL_RE, _INLINE_NAME_RE):
+        for match in pattern.finditer(window):
+            candidate = _clean_name(match.group(1))
+            if is_person_name(candidate):
+                labelled.append((abs(match.start() - needle_at), candidate))
     if labelled:
         labelled.sort()
         if hints:
             for _, candidate in labelled:
                 if _name_matches_hints(candidate, hints):
                     return candidate
-        return labelled[0][1]
+        else:
+            return labelled[0][1]
 
     scored: list[tuple[int, int, str]] = []
     for match in PERSON_NAME_RE.finditer(window):
